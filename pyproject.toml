@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "opsdroid-repohook"
+version = "0.1.0"
+description = ""
+authors = ["Leo Settele <leonhard.settele@mayflower.de>"]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+
+[tool.poetry.dev-dependencies]
+opsdroid = "^0.23.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

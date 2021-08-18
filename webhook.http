@@ -1,0 +1,6 @@
+POST {{urlbase}}/skill/{{skillname}}/test
+Content-Type: application/json
+
+{}
+
+###
