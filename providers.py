@@ -1,7 +1,6 @@
 import hashlib
 import hmac
-
-from errbot.templating import tenv
+from string import Template
 
 GITHUB_EVENTS = ['commit_comment', 'create', 'delete', 'deployment',
                  'deployment_status', 'fork', 'gollum', 'issue_comment',
@@ -32,7 +31,9 @@ class CommonGitWebProvider(object):
 
     def render_template(self, template='generic', **kwargs):
         kwargs['repo_name'] = kwargs.get('repo_name') or self.name
-        return tenv().get_template('{0}.html'.format(template)).render(**kwargs)
+        with open(f".templates/{template}") as f:
+            text = f.read()
+            return Template(text).substitute(**kwargs)
 
     def msg_generic(self, body, repo, event_type):
         return self.render_template(
@@ -138,7 +139,7 @@ class GithubHandlers(CommonGitWebProvider):
             action=action,
             commit_messages=[dict(hash=c['id'][:8], url=c['url'],
                                   msg=c['message']
-                                ) for c in body['commits'][:5]]
+                                  ) for c in body['commits'][:5]]
         )
 
     def msg_status(*args):
