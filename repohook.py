@@ -1,7 +1,7 @@
-from aiohttp.web import Request
 from opsdroid.events import Message
 from opsdroid.matchers import match_webhook, match_parse
 from opsdroid.skill import Skill
+from opsdroid.core import OpsDroid
 
 import json
 # import config
@@ -9,15 +9,14 @@ import json
 from aiohttp.web import Request, Response
 import shlex
 
+import logging
+
 # from . import providers
 from .providers import GitLabHandlers, GithubHandlers, SUPPORTED_EVENTS, DEFAULT_EVENTS
 
 DEFAULT_CONFIG = {'default_events': DEFAULT_EVENTS, 'repositories': {}, }
 
 REQUIRED_HEADERS = [('X-Github-Event', 'X-Gitlab-Event')]
-#VALIDATION_ENABLED = getattr(config, 'VALIDATE_SIGNATURE', True)
-#if VALIDATION_ENABLED:
-#    REQUIRED_HEADERS.append(('X-Hub-Signature', 'X-Gitlab-Token'), )
 
 HELP_MSG = ('Please see the output of `repohook help` for usage '
             'and configuration instructions.')
@@ -27,12 +26,17 @@ EVENT_UNKNOWN = 'Unknown event `{0}`, skipping.'
 
 README = 'https://github.com/daenney/err-repohook/blob/master/README.rst'
 
+logger = logging.getLogger(__name__)
+
 
 class RepoHook(Skill):
-    def __init__(self, opsdroid, config):
+    def __init__(self, opsdroid: OpsDroid, config):
         super(RepoHook, self).__init__(opsdroid, config)
         self.github = GithubHandlers()
         self.gitlab = GitLabHandlers()
+        self.validation_enabled = config.get('validate-signature', True)
+        if self.validation_enabled:
+            REQUIRED_HEADERS.append(('X-Hub-Signature', 'X-Gitlab-Token'), )
 
     #################################################################
     # Convenience methods to get, check or set configuration options.
@@ -371,6 +375,123 @@ class RepoHook(Skill):
             msgs.append(HELP_MSG)
         await message.respond('\n'.join(msgs))
 
-    @match_webhook('test')
-    async def hello(self, event: Request):
-        await self.opsdroid.send(Message(str('Oy there')))
+    @match_webhook('repohook')
+    async def receive(self, request: Request):
+        """Handle the incoming payload.
+
+        Here be dragons.
+
+        Validate the payload as best as we can and then delegate the creation
+        of a sensible message to a function specific to this event. If no such
+        function exists, use a generic message function.
+
+        Once we have a message, route it to the appropriate channels.
+        """
+
+        event_type = None
+        provider = None
+        if not self.validate_incoming(request):
+            logger.warning('Request is invalid {0}'.format(str(vars(request))))
+            return Response(status=400)
+
+        if 'X-Github-Event' in request.headers:
+            event_type = request.headers['X-Github-Event'].lower()
+            provider = self.github
+        elif 'X-Gitlab-Event' in request.headers:
+            event_type = request.headers['X-Gitlab-Event'].replace(' ', '_').lower()
+            provider = self.gitlab
+
+        body = await request.json()
+
+        if event_type == 'ping':
+            logger.info('Received ping event triggered by {0}'.format(body['hook']['url']))
+            return Response(status=204)
+
+        repo = provider.get_repo(body)
+        global_event = self.is_global_event(event_type, repo, body)
+
+        if global_event:
+            pass
+
+        if await self.get_repo(repo) is None and not global_event:
+            # Not a repository we know so accept the payload, return 200 but
+            # discard the message
+            logger.info('Message received for {0} but no such repository '
+                        'is configured'.format(repo))
+            return Response(status=204)
+
+        token = await self.get_token(repo)
+        if token is None and self.validation_enabled:
+            # No token, no validation. Accept the payload since it's not their
+            # fault that the user hasn't configured a token yet but log a
+            # message about it and discard it.
+            logger.info('Message received for {0} but no token '
+                        'configured'.format(repo))
+            return Response(status=204)
+
+        if self.validation_enabled and not provider.valid_message(request, token):
+            ip = request.headers.get('X-Real-IP')
+            if ip is None:
+                logger.warning('Event received for {0} but could not validate it.'.format(repo))
+            else:
+                logger.warning('Event received for {0} from {1} but could not validate it.'.format(repo, ip))
+            return Response(status=403)
+
+        message = provider.create_message(body, event_type, repo)
+        logger.debug('Prepared message: {0}'.format(message))
+
+        # - if we have a message and is it not empty or None
+        # - get all rooms for the repository we received the event for
+        # - check if we should deliver this event
+        # - join the room (this won't do anything if we're already joined)
+        # - send the message
+        if message and message is not None:
+            for room_name in await self.get_routes(repo):
+                events = await self.get_events(repo, room_name)
+                logger.debug('Routes for room {0}: {1}'.format(room_name, events))
+                if event_type in events or '*' in events:
+                    await self.join_and_send(room_name, message)
+            if global_event:
+                gr = await self.load('global_route')
+                if gr is not None:
+                    await self.join_and_send(gr, message)
+        return Response(status=204)
+
+    async def join_and_send(self, room_name, message):
+        self.opsdroid.send(Message(message, target=room_name))
+
+    def is_global_event(self, event_type, repo, body):
+        return event_type in ['repository', 'membership', 'member', 'team_add', 'fork']
+
+    def validate_incoming(self, request: Request):
+        """Validate the incoming request:
+
+          * Check if the headers we need exist
+          * Check if the payload decodes to something we expect
+          * Check if it contains the repository
+        """
+
+        if request.content_type != 'application/json':
+            logger.warning('ContentType is not json: {}'.format(request.content_type))
+            return False
+        for header in REQUIRED_HEADERS:
+            if isinstance(header, tuple):
+                if not any(request.headers.get(h) for h in header):
+                    logger.warning('Missing (any of) headers: {}'.format(header))
+                    return False
+            else:
+                if request.headers.get(header) is None:
+                    logger.warning('Missing header: {}'.format(header))
+                    return False
+
+        try:
+            body = request.json
+        except ValueError:
+            logger.warning('Request body is not json: {}'.format(request))
+            return False
+
+        if not isinstance(body, dict):
+            logger.warning('Request body is not valid json: {}'.format(body))
+            return False
+
+        return True
