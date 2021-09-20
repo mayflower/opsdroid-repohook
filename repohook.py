@@ -4,7 +4,7 @@ from opsdroid.skill import Skill
 from opsdroid.core import OpsDroid
 
 import json
-# import config
+import textwrap
 
 from aiohttp.web import Request, Response
 import shlex
@@ -38,6 +38,10 @@ class RepoHook(Skill):
         if self.validation_enabled:
             REQUIRED_HEADERS.append(('X-Hub-Signature', 'X-Gitlab-Token'), )
 
+    async def _load_defaults(self):
+        await self.store('default_events', await self.load('default_events') or DEFAULT_EVENTS)
+        await self.store('repositories', await self.load('repositories') or {})
+
     #################################################################
     # Convenience methods to get, check or set configuration options.
     #################################################################
@@ -52,22 +56,19 @@ class RepoHook(Skill):
 
     async def clear_repo(self, repo):
         """Completely remove a repository's configuration."""
-        if self.has_repo(repo):
+        if await self.has_repo(repo):
             await self.delete(f"repositories-{repo}")
 
     async def clear_route(self, repo, room):
         """Remove a route from a repository."""
-        if self.has_route(repo, room):
-            repo_data = await (await self.get_repo(repo))
+        if await self.has_route(repo, room):
+            repo_data = await self.get_repo(repo)
             repo_data['routes'].pop(room)
             await self.store(f"repositories-{repo}", repo_data)
 
     async def has_repo(self, repo):
         """Check if the repository is known."""
-        if await self.get_repo(repo) is None:
-            return False
-        else:
-            return True
+        return (await self.get_repo(repo)) is not None
 
     async def has_route(self, repo, room):
         """Check if we have a route for this repository to that room."""
@@ -78,6 +79,7 @@ class RepoHook(Skill):
 
     async def get_defaults(self):
         """Return the default events that get relayed."""
+        await self._load_defaults()
         return await self.load('default_events')
 
     async def get_events(self, repo, room):
@@ -103,9 +105,7 @@ class RepoHook(Skill):
         """Fetch the routes for a repository.
         Always check if the repository exists before calling this.
         """
-        return (await self.get_repo(repo)) or {} \
-            .get('routes', {}) \
-            .keys()
+        return list((await self.get_repo(repo)).get('routes', {}).keys())
 
     async def get_token(self, repo):
         """Returns the token for a repository.
@@ -123,10 +123,10 @@ class RepoHook(Skill):
     async def set_events(self, repo, room, events):
         """Set the events to be relayed for this combination of repository
         and room."""
-        if self.has_route(repo, room):
-            repo_data = await (await self.get_repo(repo))
-            repo_data[room] = repo_data[room] or {}  # todo needed?
-            repo_data[room]['events'] = events
+        if await self.has_route(repo, room):
+            repo_data = await self.get_repo(repo)
+            repo_data['routes'][room] = repo_data['routes'].get(room, {})  # todo needed?
+            repo_data['routes'][room]['events'] = events
             await self.store(f"repositories-{repo}", repo_data)
 
     async def set_route(self, repo, room):
@@ -134,34 +134,28 @@ class RepoHook(Skill):
 
         If the repository is unknown to us, add the repository first.
         """
-        if self.has_repo(repo):
+        if await self.has_repo(repo):
             repo_data = await self.load(repo)
         else:
             repo_data = { 'routes': {}, 'token': None }
         repo_data['routes'][room] = {}
-        await self.store(repo, repo_data)
+        await self.store(f"repositories-{repo}", repo_data)
 
     async def set_token(self, repo, token):
         """Set the token for a repository."""
-        if self.has_repo(repo):
-            repo_data = await self.load(repo)
-        else:
-            repo_data = { 'routes': {}, 'token': None }
+        repo_data = await self.get_repo(repo)
         repo_data['token'] = token
-        await self.store(repo, repo_data)
+        await self.store(f"repositories-{repo}", repo_data)
 
     async def show_repo_config(self, repo):
         """Builds up a complete list of rooms and events for a repository."""
-        if self.has_repo(repo):
-            message = ['Routing `{0}` to:'.format(repo)]
+        if await self.has_repo(repo):
+            msgs = [f'Routing `{repo}` to:']
             repo_data = await self.get_repo(repo)
             # event_msgs = [f' • `{room}` for events: {md_escape(events)}' # todo <-
-            event_msgs = [f' • `{room}` for events: {events}'
-                          for room in repo_data['routes'].keys()
-                          for events in repo_data['routes'][room].get('events', {}).keys()
-                          ]
-            message.append(event_msgs)
-            return '\n'.join(message)
+            for room in repo_data['routes'].keys():
+                msgs.append(f' • `{room}` for events: {" ".join(event for event in repo_data["routes"][room].get("events", {}))}')
+            return '\n'.join(msgs)
         else:
             return REPO_UNKNOWN.format(repo)
 
@@ -170,7 +164,7 @@ class RepoHook(Skill):
     ###########################################################
 
     def _get_args(self, message):
-        return shlex.split(message.entities.get('args', {}).get('values'))
+        return shlex.split(message.entities.get('args', {}).get('value'))
 
     @match_parse("repohook")
     async def repohook(self, message):
@@ -180,27 +174,30 @@ class RepoHook(Skill):
     @match_parse("repohook help")
     async def repohook_help(self, message):
         """Output help."""
-        halp = []
-        halp.append('This plugin has multiple commands: ')
-        halp.append(' • config: to display the full configuration of '
-                       'this plugin (not human friendly)')
-        halp.append(' • route `<repo> <room>`: to relay messages from '
-                       '`<repo>` to `<room>` for events '
-                       # '{0}'.format(md_escape(' '.join(self.get_defaults())))) # todo <-
-                       '{0}'.format(' '.join(await self.get_defaults())))
-        halp.append(' • route `<repo> <room> <events>`: to relay '
-                       'messages from `<repo>` to `<room>` for `<events>`')
-        halp.append(' • routes `<repo>`: show routes for this repository')
-        halp.append(' • routes: to display all routes')
-        halp.append(' • global route <room>: to set a route for global events')
-        halp.append(' • defaults <events>: to configure the events we '
-                       'should forward by default')
-        halp.append(' • defaults: to show the events to be forwarded '
-                       'by default')
-        halp.append(' • token `<repo>`: to configure the repository '
-                       'secret')
-        halp.append('Please see {0} for more information.'.format(README))
-        await message.respond('\n'.join(halp))
+        # '{0}'.format(md_escape(' '.join(self.get_defaults())))) # todo <-
+        defaults = await self.get_defaults()
+        halp = f"""
+        This plugin has multiple commands:
+         • config: to display the full configuration of
+                       this plugin (not human friendly)
+         • route `<repo> <room>`: to relay messages from
+                       `<repo>` to `<room>` for events
+                       {' '.join(defaults)}
+         • route `<repo> <room> <events>`: to relay
+                       messages from `<repo>` to `<room>` for `<events>`
+         • routes `<repo>`: show routes for this repository
+         • routes: to display all routes
+         • global route set <room>: to set a route for global events
+         • global route disable: to disable global events
+         • defaults <events>: to configure the events we
+                       should forward by default
+         • defaults: to show the events to be forwarded
+                       by default
+         • token `<repo>`: to configure the repository
+                       secret
+        Please see {README} for more information.
+        """
+        await message.respond(textwrap.dedent(halp))
 
     # @botcmd(admin_only=True) todo <-
     @match_parse("repohook config")
@@ -218,14 +215,11 @@ class RepoHook(Skill):
         # FIXME
         await message.respond('this command has not been ported yet!')
 
-
-
     @match_parse("repohook defaults")
     async def repohook_defaults(self, message):
         await message.respond('Events routed by default: '
                               '{0}.'.format(' '.join(await self.get_defaults())))
-                        # '{0}.'.format(md_escape(' '.join(self.get_defaults())))) # todo <-
-
+                      # '{0}.'.format(md_escape(' '.join(self.get_defaults())))) # todo <-
 
     @match_parse("repohook defaults {args}")
     async def repohook_defaults_args(self, message):
@@ -236,13 +230,13 @@ class RepoHook(Skill):
             if event in SUPPORTED_EVENTS:
                 events.append(event)
             else:
-                yield EVENT_UNKNOWN.format(event)
+                await message.respond(EVENT_UNKNOWN.format(event))
         await self.set_defaults(events)
         await message.respond('Done. Newly created routes will default to '
                'receiving: {0}.'.format(' '.join(events)))
 
     @match_parse("repohook route {args}")
-    async def repohook_route(self, message, args):
+    async def repohook_route(self, message):
         """Map a repository to a chatroom, essentially creating a route.
 
         This takes two or three arguments: author/repo, a chatroom and
@@ -260,7 +254,7 @@ class RepoHook(Skill):
             # an empty list instead of raising an IndexError
             events = args[2:]
 
-            if not self.has_route(repo, room):
+            if not await self.has_route(repo, room):
                 await self.set_route(repo, room)
 
             if events:
@@ -269,12 +263,12 @@ class RepoHook(Skill):
                         events.remove(event)
                         msgs.append(EVENT_UNKNOWN.format(event))
             else:
-                events = self.get_defaults()
+                events = await self.get_defaults()
             await self.set_events(repo, room, events)
             msgs.append('Done. Relaying messages from `{0}` to `{1}` for '
                                   'events: {2}'.format(repo, room, ' '.join(events)))
                    # 'events: {2}'.format(repo, room, md_escape(' '.join(events)))) # todo <-
-            if self.get_token(repo) is None:
+            if await self.get_token(repo) is None:
                 msgs.append("Don't forget to set the token for `{0}`. Instructions "
                        "on how to do so and why can be found "
                        "at: {1}.".format(repo, README))
@@ -301,7 +295,7 @@ class RepoHook(Skill):
         args = self._get_args(message)
         msgs = []
         for repo in args:
-            if self.has_repo(repo):
+            if await self.has_repo(repo):
                 msgs.append(await self.show_repo_config(repo))
             else:
                 msgs.append(REPO_UNKNOWN.format(repo))
@@ -350,7 +344,8 @@ class RepoHook(Skill):
             room = args[1]
             await self.clear_route(repo, room)
             msgs.append('Removed route for {0} to {1}.'.format(repo, room))
-            if not await self.get_routes(repo):
+            routes = await self.get_routes(repo)
+            if len(routes) == 0:
                 await self.clear_repo(repo)
                 msgs.append('No more routes for {0}, removing remaining '
                             'configuration.'.format(repo))
@@ -358,22 +353,28 @@ class RepoHook(Skill):
             msgs.append(HELP_MSG)
         await message.respond('\n'.join(msgs))
 
-    @match_parse("repohook global {args}")
+    @match_parse("repohook global")
     async def repohook_global(self, message):
+        """Set a global route"""
+        await message.respond(HELP_MSG)
+
+    @match_parse("repohook global {args}")
+    async def repohook_global_args(self, message):
         """Set a global route"""
         args = self._get_args(message)
         msgs = []
         key = "global_route"
-        if len(args) == 1:
+        if len(args) == 1 and args[0] == "disable":
             await self.delete(key)
             msgs.append('Removed global route.')
-        elif len(args) == 2:
+        elif len(args) == 2 and args[0] == "set":
             room = args[1]
             await self.store(key, room)
             msgs.append('Set global route to {}.'.format(room))
         else:
             msgs.append(HELP_MSG)
         await message.respond('\n'.join(msgs))
+
 
     @match_webhook('repohook')
     async def receive(self, request: Request):
