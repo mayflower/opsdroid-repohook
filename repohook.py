@@ -11,7 +11,6 @@ import shlex
 
 import logging
 
-# from . import providers
 from .providers import GitLabHandlers, GithubHandlers, SUPPORTED_EVENTS, DEFAULT_EVENTS
 
 DEFAULT_CONFIG = {'default_events': DEFAULT_EVENTS, 'repositories': {}, }
@@ -40,7 +39,6 @@ class RepoHook(Skill):
 
     async def _load_defaults(self):
         await self.store('default_events', await self.load('default_events') or DEFAULT_EVENTS)
-        await self.store('repositories', await self.load('repositories') or {})
 
     #################################################################
     # Convenience methods to get, check or set configuration options.
@@ -54,28 +52,34 @@ class RepoHook(Skill):
     async def delete(self, key):
         await self.opsdroid.memory.delete(key)
 
+    async def get_repos(self):
+        return (await self.load("repos")) or []
+
+    async def set_repos(self, repos):
+        return await self.store("repos", repos)
+
     async def clear_repo(self, repo):
         """Completely remove a repository's configuration."""
         if await self.has_repo(repo):
             await self.delete(f"repositories-{repo}")
+            repos = await self.load("repos")
+            new_repos = [r for r in repos if r != repo]
+            await self.set_repos(new_repos)
 
     async def clear_route(self, repo, room):
         """Remove a route from a repository."""
-        if await self.has_route(repo, room):
-            repo_data = await self.get_repo(repo)
-            repo_data['routes'].pop(room)
-            await self.store(f"repositories-{repo}", repo_data)
+        repo_data = await self.get_repo(repo)
+        repo_data['routes'].pop(room)
+        await self.store(f"repositories-{repo}", repo_data)
 
     async def has_repo(self, repo):
         """Check if the repository is known."""
-        return (await self.get_repo(repo)) is not None
+        return bool(await self.get_repo(repo))
 
     async def has_route(self, repo, room):
         """Check if we have a route for this repository to that room."""
-        if await self.get_route(repo, room) is None:
-            return False
-        else:
-            return True
+        rd = await self.get_route(repo, room)
+        return rd is not None
 
     async def get_defaults(self):
         """Return the default events that get relayed."""
@@ -86,10 +90,11 @@ class RepoHook(Skill):
         """Return all the events being relayed for this combination of
         repository and room, aka a route.
         """
-        return (await self.get_repo(repo)) or {} \
-            .get('routes', {}) \
-            .get(room, {}) \
-            .get('events')
+        rd = await self.get_repo(repo)
+        if rd:
+            return rd.get('routes', {}).get(room, {}).get("events", [])
+        else:
+            return []
 
     async def get_repo(self, repo):
         """Return the repo's configuration or None."""
@@ -97,9 +102,11 @@ class RepoHook(Skill):
 
     async def get_route(self, repo, room):
         """Return the configuration of this route."""
-        return (await self.get_repo(repo)) or {} \
-            .get('routes', {}) \
-            .get(room)
+        rd = await self.get_repo(repo)
+        if rd:
+            return rd.get('routes', {}).get(room)
+        else:
+            return None
 
     async def get_routes(self, repo):
         """Fetch the routes for a repository.
@@ -113,8 +120,7 @@ class RepoHook(Skill):
         Be **very** careful as to where you call this as this returns the
         plain text, uncensored token.
         """
-        return (await self.get_repo(repo)) or {} \
-            .get('token')
+        return (await self.get_repo(repo)).get('token')
 
     async def set_defaults(self, defaults):
         """Set which events are relayed by default."""
@@ -134,12 +140,15 @@ class RepoHook(Skill):
 
         If the repository is unknown to us, add the repository first.
         """
+        repo_data = {'routes': {}, 'token': None}
         if await self.has_repo(repo):
-            repo_data = await self.load(repo)
-        else:
-            repo_data = { 'routes': {}, 'token': None }
+            repo_data = await self.get_repo(repo)
         repo_data['routes'][room] = {}
         await self.store(f"repositories-{repo}", repo_data)
+        all_repos = await self.get_repos()
+        if repo not in all_repos:
+            all_repos.append(repo)
+            await self.set_repos(all_repos)
 
     async def set_token(self, repo, token):
         """Set the token for a repository."""
@@ -154,7 +163,7 @@ class RepoHook(Skill):
             repo_data = await self.get_repo(repo)
             # event_msgs = [f' • `{room}` for events: {md_escape(events)}' # todo <-
             for room in repo_data['routes'].keys():
-                msgs.append(f' • `{room}` for events: {" ".join(event for event in repo_data["routes"][room].get("events", {}))}')
+                msgs.append(f' • `{room}` for events: {" ".join(await self.get_events(repo, room))}')
             return '\n'.join(msgs)
         else:
             return REPO_UNKNOWN.format(repo)
@@ -279,7 +288,7 @@ class RepoHook(Skill):
     @match_parse("repohook routes")
     async def repohook_routes(self, message):
         """Displays the routes for all repositories."""
-        repos = [] # await self.get_repos() # fixme implement
+        repos = await self.get_repos()
         msgs = []
         if repos:
             msgs.append("You asked for it, here are all the repositories, the "
@@ -290,7 +299,7 @@ class RepoHook(Skill):
         await message.respond('\n'.join(msgs))
 
     @match_parse("repohook routes {args}")
-    async def repohook_routes(self, message):
+    async def repohook_routes_args(self, message):
         """Displays the routes for one, multiple or all repositories."""
         args = self._get_args(message)
         msgs = []
@@ -342,13 +351,16 @@ class RepoHook(Skill):
         elif len(args) == 2:
             repo = args[0]
             room = args[1]
-            await self.clear_route(repo, room)
-            msgs.append('Removed route for {0} to {1}.'.format(repo, room))
-            routes = await self.get_routes(repo)
-            if len(routes) == 0:
-                await self.clear_repo(repo)
-                msgs.append('No more routes for {0}, removing remaining '
-                            'configuration.'.format(repo))
+            if await self.has_route(repo, room):
+                await self.clear_route(repo, room)
+                msgs.append('Removed route for {0} to {1}.'.format(repo, room))
+                routes = await self.get_routes(repo)
+                if len(routes) == 0:
+                    await self.clear_repo(repo)
+                    msgs.append('No more routes for {0}, removing remaining '
+                                'configuration.'.format(repo))
+            else:
+                msgs.append(f"No such route {room} for repo {repo}. Aborting. ")
         else:
             msgs.append(HELP_MSG)
         await message.respond('\n'.join(msgs))
