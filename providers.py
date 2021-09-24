@@ -22,7 +22,6 @@ class CommonGitWebProvider(object):
         self.env = Environment(
             loader=FileSystemLoader("templates")
         )
-        print(self.env.loader.searchpath)
 
     def create_message(self, body, event_type, repo):
         """
