@@ -1,6 +1,5 @@
 import hashlib
 import hmac
-from string import Template
 
 from aiohttp.web import Request
 from jinja2 import Environment, FileSystemLoader
