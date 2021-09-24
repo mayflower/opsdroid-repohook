@@ -27,7 +27,10 @@ README = 'https://github.com/daenney/err-repohook/blob/master/README.rst'
 
 logger = logging.getLogger(__name__)
 
-
+"""
+# Debug the in-mem db with this one weird trick!
+logger.info(json.dumps(self.opsdroid.memory.databases[0].memory))
+"""
 class RepoHook(Skill):
     def __init__(self, opsdroid: OpsDroid, config):
         super(RepoHook, self).__init__(opsdroid, config)
