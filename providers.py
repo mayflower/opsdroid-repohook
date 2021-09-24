@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 from string import Template
+from aiohttp.web import Request
 
 GITHUB_EVENTS = ['commit_comment', 'create', 'delete', 'deployment',
                  'deployment_status', 'fork', 'gollum', 'issue_comment',
@@ -31,7 +32,7 @@ class CommonGitWebProvider(object):
 
     def render_template(self, template='generic', **kwargs):
         kwargs['repo_name'] = kwargs.get('repo_name') or self.name
-        with open(f".templates/{template}") as f:
+        with open(f"{__path__}/templates/{template}.html") as f:
             text = f.read()
             return Template(text).substitute(**kwargs)
 
@@ -44,14 +45,14 @@ class GithubHandlers(CommonGitWebProvider):
     name = 'Github'
 
     @staticmethod
-    def valid_message(request, token):
+    async def valid_message(request: Request, token):
         """Validate the signature of the incoming payload.
 
         The header received from Github is in the form of algorithm=hash.
         """
         # TODO: Fix GitLab token validation:
         #       https://docs.gitlab.com/ce/web_hooks/web_hooks.html#secret-token
-        signature = request.get_header('X-Hub-Signature')
+        signature = request.headers.get('X-Hub-Signature')
 
         if signature is None:
             return False
@@ -64,7 +65,7 @@ class GithubHandlers(CommonGitWebProvider):
         if alg != 'sha1':
             return False
 
-        message = request.body.read()
+        message = await request.read()
         mac = hmac.new(token.encode(), msg=message, digestmod=hashlib.sha1).hexdigest()
         return hmac.compare_digest(mac, sig)
 
@@ -180,14 +181,14 @@ class GitLabHandlers(CommonGitWebProvider):
     name = 'GitLab'
 
     @staticmethod
-    def valid_message(request, token):
+    async def valid_message(request: Request, token):
         """Validate the signature of the incoming payload.
 
         The header received from GitLab is in the form of algorithm=hash.
         # TODO: Fix GitLab token validation:
         #       https://docs.gitlab.com/ce/web_hooks/web_hooks.html#secret-token
         """
-        signature = request.get_header('X-Gitlab-Token')
+        signature = request.headers.get('X-Gitlab-Token')
         return True
 
     def get_repo(self, body):

@@ -388,7 +388,7 @@ class RepoHook(Skill):
         await message.respond('\n'.join(msgs))
 
 
-    @match_webhook('repohook')
+    @match_webhook('')
     async def receive(self, request: Request):
         """Handle the incoming payload.
 
@@ -403,7 +403,7 @@ class RepoHook(Skill):
 
         event_type = None
         provider = None
-        if not self.validate_incoming(request):
+        if not await self.validate_incoming(request):
             logger.warning('Request is invalid {0}'.format(str(vars(request))))
             return Response(status=400)
 
@@ -426,7 +426,7 @@ class RepoHook(Skill):
         if global_event:
             pass
 
-        if await self.get_repo(repo) is None and not global_event:
+        if not (await self.has_repo(repo)) and not global_event:
             # Not a repository we know so accept the payload, return 200 but
             # discard the message
             logger.info('Message received for {0} but no such repository '
@@ -442,7 +442,7 @@ class RepoHook(Skill):
                         'configured'.format(repo))
             return Response(status=204)
 
-        if self.validation_enabled and not provider.valid_message(request, token):
+        if self.validation_enabled and not (await provider.valid_message(request, token)):
             ip = request.headers.get('X-Real-IP')
             if ip is None:
                 logger.warning('Event received for {0} but could not validate it.'.format(repo))
@@ -471,12 +471,12 @@ class RepoHook(Skill):
         return Response(status=204)
 
     async def join_and_send(self, room_name, message):
-        self.opsdroid.send(Message(message, target=room_name))
+        await self.opsdroid.send(Message(message, target=room_name))
 
     def is_global_event(self, event_type, repo, body):
         return event_type in ['repository', 'membership', 'member', 'team_add', 'fork']
 
-    def validate_incoming(self, request: Request):
+    async def validate_incoming(self, request: Request):
         """Validate the incoming request:
 
           * Check if the headers we need exist
@@ -498,7 +498,7 @@ class RepoHook(Skill):
                     return False
 
         try:
-            body = request.json
+            body = await request.json()
         except ValueError:
             logger.warning('Request body is not json: {}'.format(request))
             return False
