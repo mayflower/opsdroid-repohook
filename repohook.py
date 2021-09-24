@@ -1,15 +1,13 @@
-from opsdroid.events import Message
-from opsdroid.matchers import match_webhook, match_parse
-from opsdroid.skill import Skill
-from opsdroid.core import OpsDroid
-
 import json
+import logging
+import shlex
 import textwrap
 
 from aiohttp.web import Request, Response
-import shlex
-
-import logging
+from opsdroid.core import OpsDroid
+from opsdroid.events import Message
+from opsdroid.matchers import match_webhook, match_parse
+from opsdroid.skill import Skill
 
 from .providers import GitLabHandlers, GithubHandlers, SUPPORTED_EVENTS, DEFAULT_EVENTS
 
@@ -31,6 +29,8 @@ logger = logging.getLogger(__name__)
 # Debug the in-mem db with this one weird trick!
 logger.info(json.dumps(self.opsdroid.memory.databases[0].memory))
 """
+
+
 class RepoHook(Skill):
     def __init__(self, opsdroid: OpsDroid, config):
         super(RepoHook, self).__init__(opsdroid, config)
@@ -231,7 +231,7 @@ class RepoHook(Skill):
     async def repohook_defaults(self, message):
         await message.respond('Events routed by default: '
                               '{0}.'.format(' '.join(await self.get_defaults())))
-                      # '{0}.'.format(md_escape(' '.join(self.get_defaults())))) # todo <-
+        # '{0}.'.format(md_escape(' '.join(self.get_defaults())))) # todo <-
 
     @match_parse("repohook defaults {args}")
     async def repohook_defaults_args(self, message):
@@ -245,7 +245,7 @@ class RepoHook(Skill):
                 await message.respond(EVENT_UNKNOWN.format(event))
         await self.set_defaults(events)
         await message.respond('Done. Newly created routes will default to '
-               'receiving: {0}.'.format(' '.join(events)))
+                              'receiving: {0}.'.format(' '.join(events)))
 
     @match_parse("repohook route {args}")
     async def repohook_route(self, message):
@@ -278,12 +278,12 @@ class RepoHook(Skill):
                 events = await self.get_defaults()
             await self.set_events(repo, room, events)
             msgs.append('Done. Relaying messages from `{0}` to `{1}` for '
-                                  'events: {2}'.format(repo, room, ' '.join(events)))
-                   # 'events: {2}'.format(repo, room, md_escape(' '.join(events)))) # todo <-
+                        'events: {2}'.format(repo, room, ' '.join(events)))
+            # 'events: {2}'.format(repo, room, md_escape(' '.join(events)))) # todo <-
             if await self.get_token(repo) is None:
                 msgs.append("Don't forget to set the token for `{0}`. Instructions "
-                       "on how to do so and why can be found "
-                       "at: {1}.".format(repo, README))
+                            "on how to do so and why can be found "
+                            "at: {1}.".format(repo, README))
         else:
             msgs.append(HELP_MSG)
         await message.respond('\n'.join(msgs))
@@ -295,7 +295,7 @@ class RepoHook(Skill):
         msgs = []
         if repos:
             msgs.append("You asked for it, here are all the repositories, the "
-                   "rooms and associated events that are relayed:")
+                        "rooms and associated events that are relayed:")
             msgs.extend([await self.show_repo_config(repo) for repo in repos])
         else:
             msgs.append('No repositories configured, nothing to show.')
@@ -389,7 +389,6 @@ class RepoHook(Skill):
         else:
             msgs.append(HELP_MSG)
         await message.respond('\n'.join(msgs))
-
 
     @match_webhook('')
     async def receive(self, request: Request):

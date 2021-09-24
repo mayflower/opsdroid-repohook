@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 from string import Template
+
 from aiohttp.web import Request
 
 GITHUB_EVENTS = ['commit_comment', 'create', 'delete', 'deployment',
