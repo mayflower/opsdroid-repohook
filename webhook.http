@@ -1,4 +1,4 @@
-POST {{urlbase}}/skill/{{skillname}
+POST {{urlbase}}/skill/{{skillname}}/
 Content-Type: application/json
 X-Gitlab-Event: Push Hook
 X-Gitlab-Token: SECRET

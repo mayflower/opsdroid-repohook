@@ -3,6 +3,7 @@ import hmac
 from string import Template
 
 from aiohttp.web import Request
+from jinja2 import Environment, FileSystemLoader
 
 GITHUB_EVENTS = ['commit_comment', 'create', 'delete', 'deployment',
                  'deployment_status', 'fork', 'gollum', 'issue_comment',
@@ -17,6 +18,12 @@ DEFAULT_EVENTS = ['commit_comment', 'issue_comment', 'issues', 'pull_request_rev
 
 
 class CommonGitWebProvider(object):
+    def __init__(self):
+        self.env = Environment(
+            loader=FileSystemLoader("templates")
+        )
+        print(self.env.loader.searchpath)
+
     def create_message(self, body, event_type, repo):
         """
         Dispatch the message. Check explicitly with hasattr first. When
@@ -33,9 +40,8 @@ class CommonGitWebProvider(object):
 
     def render_template(self, template='generic', **kwargs):
         kwargs['repo_name'] = kwargs.get('repo_name') or self.name
-        with open(f"{__path__}/templates/{template}.html") as f:
-            text = f.read()
-            return Template(text).substitute(**kwargs)
+        tpl = self.env.get_template(f"{template}.html")
+        return tpl.render(**kwargs)
 
     def msg_generic(self, body, repo, event_type):
         return self.render_template(
