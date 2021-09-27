@@ -212,22 +212,6 @@ class RepoHook(Skill):
         """
         await message.respond(textwrap.dedent(halp))
 
-    # @botcmd(admin_only=True) todo <-
-    @match_parse("repohook config")
-    async def repohook_config(self, message):
-        """Returns the current configuration of the plugin."""
-        # pprint can't deal with nested dicts, json.dumps is aces.
-        await message.respond(json.dumps(self.config, indent=4, sort_keys=True))
-
-    # @botcmd(admin_only=True) todo <-
-    @match_parse("repohook reset")
-    async def repohook_reset(self, message):
-        """Nuke the complete configuration."""
-        # self.config = DEFAULT_CONFIG
-        # self.save_config()
-        # FIXME
-        await message.respond('this command has not been ported yet!')
-
     @match_parse("repohook defaults")
     async def repohook_defaults(self, message):
         await message.respond('Events routed by default: '
