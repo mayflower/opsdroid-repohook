@@ -3,6 +3,7 @@ import logging
 import shlex
 import textwrap
 
+import markdown
 from aiohttp.web import Request, Response
 from opsdroid.core import OpsDroid
 from opsdroid.events import Message
@@ -473,7 +474,8 @@ class RepoHook(Skill):
         return Response(status=204)
 
     async def join_and_send(self, room_name, message):
-        await self.opsdroid.send(Message(message, target=room_name))
+        html_msg = markdown.markdown(message)
+        await self.opsdroid.send(Message(html_msg, target=room_name))
 
     def is_global_event(self, event_type, repo, body):
         return event_type in ['repository', 'membership', 'member', 'team_add', 'fork']

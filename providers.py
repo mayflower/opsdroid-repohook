@@ -19,7 +19,10 @@ DEFAULT_EVENTS = ['commit_comment', 'issue_comment', 'issues', 'pull_request_rev
 class CommonGitWebProvider(object):
     def __init__(self):
         self.env = Environment(
-            loader=FileSystemLoader("templates")
+            loader=FileSystemLoader("templates"),
+            trim_blocks=True,
+            keep_trailing_newline=False,
+            autoescape=True,
         )
 
     def create_message(self, body, event_type, repo):

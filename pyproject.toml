@@ -6,6 +6,8 @@ authors = ["Leo Settele <leonhard.settele@mayflower.de>"]
 
 [tool.poetry.dependencies]
 python = "^3.9"
+Markdown = "^3.3.4"
+matrix-nio = "^0.18.7"
 
 [tool.poetry.dev-dependencies]
 opsdroid = "^0.23.0"
