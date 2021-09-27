@@ -9,8 +9,11 @@
 {%- if action == 'created' -%}
 \[{{repo_name}}] \[{{repo}}] {{user}} {{action}} branch {{branch}} ({{url}}):
 {%- else -%}
-\[{{repo_name}}] \[{{repo}}/{{branch}}] {{user}} {{action}} {{commits}} {{commit}} ({{url}}):
+\[{{repo_name}}] \[{{repo}}/{{branch}}] {{user}} {{action}} [{{commits}} {{commit}}]({{url}}):
 {%- endif -%}
-{% for c in commit_messages %}
-  - [{{c.hash}}] {{c.msg}} ({{c.url}}){% endfor %}
+<ul>
+{% for c in body.commits %}
+<li><a href="{{c.url}}">{{c.id | truncate(8, True, '')}}</a> - {{c.title}}</li>
+{% endfor %}
+</ul>
 {%- endif -%}

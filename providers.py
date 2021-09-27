@@ -146,9 +146,6 @@ class GithubHandlers(CommonGitWebProvider):
             branch=body['ref'].split('/')[-1],
             url=body['compare'],
             action=action,
-            commit_messages=[dict(hash=c['id'][:8], url=c['url'],
-                                  msg=c['message']
-                                  ) for c in body['commits'][:5]]
         )
 
     def msg_status(*args):
