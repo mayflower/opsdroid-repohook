@@ -102,7 +102,7 @@ class RepoHook(Skill):
 
     async def get_repo(self, repo):
         """Return the repo's configuration or None."""
-        return await self.load(f"repositories-{repo}")
+        return (await self.load(f"repositories-{repo}")) or {}
 
     async def get_route(self, repo, room):
         """Return the configuration of this route."""
@@ -420,8 +420,9 @@ class RepoHook(Skill):
                         'is configured'.format(repo))
             return Response(status=204)
 
+        # FIXME validation for global events
         token = await self.get_token(repo)
-        if token is None and self.validation_enabled:
+        if not global_event and token is None and self.validation_enabled:
             # No token, no validation. Accept the payload since it's not their
             # fault that the user hasn't configured a token yet but log a
             # message about it and discard it.
@@ -429,7 +430,7 @@ class RepoHook(Skill):
                         'configured'.format(repo))
             return Response(status=204)
 
-        if self.validation_enabled and not (await provider.valid_message(request, token)):
+        if not global_event and self.validation_enabled and not (await provider.valid_message(request, token)):
             ip = request.headers.get('X-Real-IP')
             if ip is None:
                 logger.warning('Event received for {0} but could not validate it.'.format(repo))
